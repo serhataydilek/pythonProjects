@@ -273,6 +273,163 @@ def get_port_service_name(port: int) -> str:
     }
     return common_ports.get(port, f"Port-{port}")
 
+def get_service_banner(ip: str, port: int, timeout: float = 2.0) -> Optional[str]:
+    """
+    Attempts to grab the service banner from an open port.
+    Returns the banner string if available.
+    """
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
+        sock.connect((ip, port))
+        
+        # Send a generic request for HTTP-based services
+        if port in [80, 8080, 8443]:
+            sock.send(b"HEAD / HTTP/1.0\r\n\r\n")
+        elif port == 22:  # SSH
+            pass  # SSH sends banner automatically
+        elif port == 21:  # FTP
+            pass  # FTP sends banner automatically
+        else:
+            # Try to receive data anyway
+            pass
+        
+        # Receive banner
+        banner = sock.recv(1024).decode('utf-8', errors='ignore').strip()
+        sock.close()
+        
+        # Clean up banner
+        if banner:
+            # Extract version info from common banner formats
+            banner = banner.split('\n')[0][:100]  # First line, max 100 chars
+            return banner
+        
+        return None
+    except Exception:
+        return None
+
+def check_vulnerabilities(service_info: Dict[str, any]) -> List[Dict[str, str]]:
+    """
+    Checks for known vulnerabilities based on service versions.
+    Returns a list of vulnerability warnings.
+    """
+    vulnerabilities = []
+    
+    # Port-based vulnerability checks
+    port = service_info.get('port', 0)
+    banner = service_info.get('banner', '').lower() if service_info.get('banner') else ''
+    
+    # Telnet - Insecure protocol
+    if port == 23:
+        vulnerabilities.append({
+            'severity': 'HIGH',
+            'service': 'Telnet',
+            'issue': 'Insecure protocol - transmits data in plaintext',
+            'recommendation': 'Use SSH (port 22) instead'
+        })
+    
+    # FTP - Insecure protocol
+    if port == 21:
+        vulnerabilities.append({
+            'severity': 'MEDIUM',
+            'service': 'FTP',
+            'issue': 'Insecure protocol - credentials sent in plaintext',
+            'recommendation': 'Use SFTP or FTPS instead'
+        })
+    
+    # HTTP on standard web ports - No encryption
+    if port in [80, 8080] and banner:
+        vulnerabilities.append({
+            'severity': 'MEDIUM',
+            'service': 'HTTP',
+            'issue': 'Unencrypted web traffic',
+            'recommendation': 'Use HTTPS (port 443) instead'
+        })
+    
+    # SMB v1 detection
+    if port == 445:
+        vulnerabilities.append({
+            'severity': 'HIGH',
+            'service': 'SMB',
+            'issue': 'SMBv1 may be enabled (EternalBlue vulnerability)',
+            'recommendation': 'Disable SMBv1 and use SMBv2/v3 only'
+        })
+    
+    # VNC - Often has weak authentication
+    if port == 5900:
+        vulnerabilities.append({
+            'severity': 'MEDIUM',
+            'service': 'VNC',
+            'issue': 'VNC may have weak or no authentication',
+            'recommendation': 'Use strong passwords and VNC over SSH tunnel'
+        })
+    
+    # RDP exposed to internet
+    if port == 3389:
+        vulnerabilities.append({
+            'severity': 'MEDIUM',
+            'service': 'RDP',
+            'issue': 'RDP exposed - vulnerable to brute force attacks',
+            'recommendation': 'Use VPN, enable NLA, or restrict access by IP'
+        })
+    
+    # Check for old/vulnerable versions in banner
+    if banner:
+        # OpenSSH old versions
+        if 'openssh' in banner:
+            # Extract version
+            import re
+            version_match = re.search(r'openssh[_\s]+([\d.]+)', banner)
+            if version_match:
+                version = version_match.group(1)
+                major_minor = '.'.join(version.split('.')[:2])
+                try:
+                    if float(major_minor) < 7.4:
+                        vulnerabilities.append({
+                            'severity': 'HIGH',
+                            'service': f'OpenSSH {version}',
+                            'issue': 'Outdated OpenSSH version with known vulnerabilities',
+                            'recommendation': 'Upgrade to OpenSSH 8.0 or later'
+                        })
+                except ValueError:
+                    pass
+        
+        # Apache old versions
+        if 'apache' in banner:
+            version_match = re.search(r'apache/([\d.]+)', banner)
+            if version_match:
+                version = version_match.group(1)
+                major_minor = '.'.join(version.split('.')[:2])
+                try:
+                    if float(major_minor) < 2.4:
+                        vulnerabilities.append({
+                            'severity': 'HIGH',
+                            'service': f'Apache {version}',
+                            'issue': 'Outdated Apache version with known vulnerabilities',
+                            'recommendation': 'Upgrade to Apache 2.4.x or later'
+                        })
+                except ValueError:
+                    pass
+        
+        # nginx old versions
+        if 'nginx' in banner:
+            version_match = re.search(r'nginx/([\d.]+)', banner)
+            if version_match:
+                version = version_match.group(1)
+                major_minor = '.'.join(version.split('.')[:2])
+                try:
+                    if float(major_minor) < 1.18:
+                        vulnerabilities.append({
+                            'severity': 'MEDIUM',
+                            'service': f'nginx {version}',
+                            'issue': 'Outdated nginx version',
+                            'recommendation': 'Upgrade to nginx 1.20.x or later'
+                        })
+                except ValueError:
+                    pass
+    
+    return vulnerabilities
+
 def run_ping_to_update_arp(ip: str, verbose: bool = False) -> bool:
     """
     Pings the target IP to force the operating system to update its ARP table.
@@ -363,6 +520,7 @@ def scan_single_host(ip_str: str, scan_ports_flag: bool = False,
                      ports_to_scan: List[int] = None, 
                      resolve_hostname: bool = False,
                      fingerprint: bool = False,
+                     vuln_check: bool = False,
                      verbose: bool = False) -> Optional[Dict[str, any]]:
     """
     Scans a single host and returns its IP, MAC address, hostname, and open ports if active.
@@ -391,8 +549,29 @@ def scan_single_host(ip_str: str, scan_ports_flag: bool = False,
         if scan_ports_flag and ports_to_scan:
             open_ports = scan_ports(ip_str, ports_to_scan)
             host_info["open_ports"] = open_ports
+            
+            # 5. Get service banners and check vulnerabilities if requested
+            if vuln_check and open_ports:
+                banners = {}
+                all_vulnerabilities = []
+                
+                for port in open_ports:
+                    banner = get_service_banner(ip_str, port)
+                    if banner:
+                        banners[port] = banner
+                    
+                    # Check for vulnerabilities
+                    service_info = {'port': port, 'banner': banner}
+                    vulns = check_vulnerabilities(service_info)
+                    if vulns:
+                        all_vulnerabilities.extend(vulns)
+                
+                if banners:
+                    host_info["banners"] = banners
+                if all_vulnerabilities:
+                    host_info["vulnerabilities"] = all_vulnerabilities
         
-        # 5. Device fingerprinting if requested
+        # 6. Device fingerprinting if requested
         if fingerprint:
             device_type = get_device_type(mac_address, hostname, open_ports)
             host_info["device_type"] = device_type
@@ -406,6 +585,7 @@ def scan_network(network_range: str, max_workers: int = 50,
                  ports_to_scan: List[int] = None,
                  resolve_hostname: bool = False,
                  fingerprint: bool = False,
+                 vuln_check: bool = False,
                  verbose: bool = False) -> List[Dict[str, any]]:
     """
     Scans the specified network range using ping and ARP table lookups.
@@ -429,6 +609,8 @@ def scan_network(network_range: str, max_workers: int = 50,
         print(f"[+] Port scanning: Enabled ({len(ports_to_scan)} ports)")
     if fingerprint:
         print(f"[+] Device fingerprinting: Enabled")
+    if vuln_check:
+        print(f"[+] Vulnerability checking: Enabled")
     print(f"[+] Starting scan at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
     
     scanned = 0
@@ -438,7 +620,8 @@ def scan_network(network_range: str, max_workers: int = 50,
         # Submit all scan jobs
         future_to_ip = {
             executor.submit(scan_single_host, str(ip), scan_ports_flag, 
-                          ports_to_scan, resolve_hostname, fingerprint, verbose): str(ip) 
+                          ports_to_scan, resolve_hostname, fingerprint, 
+                          vuln_check, verbose): str(ip) 
             for ip in network.hosts()
         }
         
@@ -462,6 +645,11 @@ def scan_network(network_range: str, max_workers: int = 50,
                         ports_str = ', '.join([f"{p}/{get_port_service_name(p)}" for p in result['open_ports']])
                         host_str += f" | Ports: {ports_str}"
                     print(host_str)
+                    
+                    # Display vulnerabilities if found
+                    if vuln_check and 'vulnerabilities' in result and result['vulnerabilities']:
+                        for vuln in result['vulnerabilities']:
+                            print(f"    [!] {vuln['severity']}: {vuln['service']} - {vuln['issue']}")
                 
                 # Progress indicator
                 if scanned % 10 == 0 or scanned == total_hosts:
@@ -477,7 +665,7 @@ def scan_network(network_range: str, max_workers: int = 50,
 
 def print_results(hosts: List[Dict[str, any]], show_ports: bool = False, 
                   show_hostname: bool = False, show_fingerprint: bool = False,
-                  show_topology: bool = False) -> None:
+                  show_topology: bool = False, show_vulns: bool = False) -> None:
     """Prints the discovered hosts in a clean table format."""
     
     # Determine column width based on options
@@ -529,9 +717,25 @@ def print_results(hosts: List[Dict[str, any]], show_ports: bool = False,
             row += f" {ports_str:<30}"
         
         print(row)
+        
+        # Print vulnerabilities if requested
+        if show_vulns and 'vulnerabilities' in host and host['vulnerabilities']:
+            for vuln in host['vulnerabilities']:
+                severity_color = vuln['severity']
+                print(f"     └─ [{severity_color}] {vuln['service']}: {vuln['issue']}")
+                print(f"        → {vuln['recommendation']}")
     
     print("="*width)
     print(f" Total active hosts: {len(hosts)}")
+    
+    # Count vulnerabilities
+    if show_vulns:
+        total_vulns = sum(len(host.get('vulnerabilities', [])) for host in hosts)
+        if total_vulns > 0:
+            high_vulns = sum(1 for host in hosts for v in host.get('vulnerabilities', []) if v['severity'] == 'HIGH')
+            medium_vulns = sum(1 for host in hosts for v in host.get('vulnerabilities', []) if v['severity'] == 'MEDIUM')
+            print(f" Total vulnerabilities: {total_vulns} (HIGH: {high_vulns}, MEDIUM: {medium_vulns})")
+    
     print("="*width)
     
     # Print topology information if requested
@@ -628,6 +832,7 @@ def monitor_network(network_range: str, interval: int = 30,
                    ports_to_scan: List[int] = None,
                    resolve_hostname: bool = False,
                    fingerprint: bool = False,
+                   vuln_check: bool = False,
                    notify: bool = False,
                    verbose: bool = False) -> None:
     """
@@ -652,7 +857,8 @@ def monitor_network(network_range: str, interval: int = 30,
             
             current_hosts = scan_network(
                 network_range, max_workers, scan_ports_flag, 
-                ports_to_scan, resolve_hostname, fingerprint, verbose
+                ports_to_scan, resolve_hostname, fingerprint, 
+                vuln_check, verbose
             )
             
             # Detect changes after first scan
@@ -733,9 +939,10 @@ Examples:
   %(prog)s -t 10.0.0.0/24 -w 100 -v
   %(prog)s -t 192.168.1.0/24 -o json -f scan_results.json
   %(prog)s -t 192.168.1.0/24 --hostname --ports --fingerprint
+  %(prog)s -t 192.168.1.0/24 --ports --vuln-check
   %(prog)s -t 192.168.1.0/24 --topology
   %(prog)s -t 192.168.1.0/24 --monitor --interval 60 --notify
-  %(prog)s -t 192.168.1.0/24 --fingerprint --hostname --ports --topology
+  %(prog)s -t 192.168.1.0/24 --fingerprint --hostname --ports --vuln-check --topology
         """
     )
     parser.add_argument(
@@ -790,6 +997,10 @@ Examples:
         '--notify', action='store_true',
         help='Enable desktop notifications for network changes (only with --monitor)'
     )
+    parser.add_argument(
+        '--vuln-check', action='store_true',
+        help='Check for known vulnerabilities in discovered services (requires --ports)'
+    )
     
     args = parser.parse_args()
     
@@ -825,6 +1036,7 @@ Examples:
             ports_to_scan,
             args.hostname,
             args.fingerprint,
+            args.vuln_check,
             args.notify,
             args.verbose
         )
@@ -837,12 +1049,13 @@ Examples:
             ports_to_scan,
             args.hostname,
             args.fingerprint,
+            args.vuln_check,
             args.verbose
         )
         
         # Display results
         print_results(discovered_hosts, args.ports, args.hostname, 
-                     args.fingerprint, args.topology)
+                     args.fingerprint, args.topology, args.vuln_check)
         
         # Save to file if requested
         if args.output_format and args.output_file:

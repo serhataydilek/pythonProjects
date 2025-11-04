@@ -17,6 +17,7 @@ A cross-platform network scanner that discovers active hosts on your local netwo
 - 🗺️ **Network Topology** - Analyze network structure and device distribution
 - 👁️ **Continuous Monitoring** - Track network changes in real-time
 - 🔔 **Desktop Notifications** - Get alerts when devices join or leave the network
+- ⚠️ **Vulnerability Checking** - Detect insecure services and outdated software versions
 
 ## Requirements
 
@@ -79,9 +80,15 @@ python arpPing.py -t 192.168.1.0/24 --topology
 python arpPing.py -t 192.168.1.0/24 --monitor --interval 60 --notify
 ```
 
+#### Vulnerability Scanning
+```bash
+# Scan for security vulnerabilities
+python arpPing.py -t 192.168.1.0/24 --ports --vuln-check
+```
+
 #### Full-Featured Scan
 ```bash
-python arpPing.py -t 192.168.1.0/24 --hostname --ports --fingerprint --topology
+python arpPing.py -t 192.168.1.0/24 --hostname --ports --fingerprint --vuln-check --topology
 ```
 
 #### Fast Scan with More Threads
@@ -121,6 +128,7 @@ python arpPing.py -t 192.168.1.0/24 -o csv -f scan_results.csv
 | `--monitor` | - | Continuous monitoring mode | False | ❌ No |
 | `--interval` | - | Monitoring interval in seconds | 30 | ❌ No |
 | `--notify` | - | Enable desktop notifications (with `--monitor`) | False | ❌ No |
+| `--vuln-check` | - | Check for known vulnerabilities (requires `--ports`) | False | ❌ No |
 | `--help` | `-h` | Show help message and exit | - | ❌ No |
 
 ## Output Example
@@ -207,6 +215,29 @@ python arpPing.py -t 192.168.1.0/24 -o csv -f scan_results.csv
 
 [!] ALERT: 1 device(s) left:
     [-] 192.168.1.200 -> 11:22:33:44:55:66 [Apple Device]
+```
+
+### With Vulnerability Checking
+```
+[+] Found: 192.168.1.50  -> aa:bb:cc:dd:ee:ff | Ports: 21/FTP, 23/Telnet, 80/HTTP
+    [!] HIGH: Telnet - Insecure protocol - transmits data in plaintext
+    [!] MEDIUM: FTP - Insecure protocol - credentials sent in plaintext
+    [!] MEDIUM: HTTP - Unencrypted web traffic
+
+=================================================================
+ IP Address           MAC Address          Status      Open Ports
+=================================================================
+ 192.168.1.50         aa:bb:cc:dd:ee:ff    Responded   21, 23, 80
+     └─ [HIGH] Telnet: Insecure protocol - transmits data in plaintext
+        → Use SSH (port 22) instead
+     └─ [MEDIUM] FTP: Insecure protocol - credentials sent in plaintext
+        → Use SFTP or FTPS instead
+     └─ [MEDIUM] HTTP: Unencrypted web traffic
+        → Use HTTPS (port 443) instead
+=================================================================
+ Total active hosts: 1
+ Total vulnerabilities: 3 (HIGH: 1, MEDIUM: 2)
+=================================================================
 ```
 
 ## JSON Output Format
