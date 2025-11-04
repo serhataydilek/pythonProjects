@@ -305,6 +305,10 @@ def get_service_banner(ip: str, port: int, timeout: float = 2.0) -> Optional[str
             return banner
         
         return None
+    except socket.timeout:
+        return None
+    except ConnectionRefusedError:
+        return None
     except Exception:
         return None
 
@@ -661,6 +665,29 @@ def scan_network(network_range: str, max_workers: int = 50,
                     print(f"[-] Error scanning {ip}: {exc}")
 
     print(f"\n[+] Scan completed at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    
+    # Print scan statistics
+    if active_hosts:
+        responded_count = sum(1 for h in active_hosts if h.get('responded', False))
+        arp_only_count = len(active_hosts) - responded_count
+        
+        print(f"\n[*] Scan Statistics:")
+        print(f"    - Responded to ping: {responded_count}/{len(active_hosts)}")
+        print(f"    - ARP only: {arp_only_count}/{len(active_hosts)}")
+        
+        if fingerprint:
+            device_types = {}
+            for host in active_hosts:
+                dtype = host.get('device_type', 'Unknown')
+                device_types[dtype] = device_types.get(dtype, 0) + 1
+            print(f"    - Unique device types: {len(device_types)}")
+        
+        if vuln_check:
+            total_vulns = sum(len(host.get('vulnerabilities', [])) for host in active_hosts)
+            if total_vulns > 0:
+                high_vulns = sum(1 for host in active_hosts for v in host.get('vulnerabilities', []) if v['severity'] == 'HIGH')
+                print(f"    - Vulnerabilities found: {total_vulns} (HIGH: {high_vulns})")
+    
     return active_hosts
 
 def print_results(hosts: List[Dict[str, any]], show_ports: bool = False, 
@@ -1007,6 +1034,14 @@ Examples:
     # Validate output arguments
     if args.output_format and not args.output_file:
         parser.error("-f/--file is required when -o/--output is specified")
+    
+    # Validate vuln-check requires ports
+    if args.vuln_check and not args.ports:
+        parser.error("--vuln-check requires --ports to be enabled")
+    
+    # Validate notify requires monitor
+    if args.notify and not args.monitor:
+        print("[!] Warning: --notify only works with --monitor mode")
     
     # Prepare port list
     ports_to_scan = None
