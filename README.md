@@ -11,6 +11,12 @@ A cross-platform network scanner that discovers active hosts on your local netwo
 - 🐛 **Verbose Debug Mode** - Detailed debugging information
 - 🎨 **Clean Table Output** - Well-formatted results display
 - 📝 **Comprehensive Help** - Built-in help and examples
+- 🔍 **Hostname Resolution** - Discover device names on your network
+- 🔌 **Port Scanning** - Detect open ports and running services
+- 📱 **Device Fingerprinting** - Identify device types (Apple, Samsung, Raspberry Pi, etc.)
+- 🗺️ **Network Topology** - Analyze network structure and device distribution
+- 👁️ **Continuous Monitoring** - Track network changes in real-time
+- 🔔 **Desktop Notifications** - Get alerts when devices join or leave the network
 
 ## Requirements
 
@@ -43,6 +49,41 @@ sudo python3 arpPing.py -t 192.168.1.0/24
 
 ### Advanced Options
 
+#### Hostname Resolution
+```bash
+python arpPing.py -t 192.168.1.0/24 --hostname
+```
+
+#### Port Scanning
+```bash
+# Scan common ports
+python arpPing.py -t 192.168.1.0/24 --ports
+
+# Scan specific ports
+python arpPing.py -t 192.168.1.0/24 --ports --port-list "22,80,443,3389"
+```
+
+#### Device Fingerprinting
+```bash
+python arpPing.py -t 192.168.1.0/24 --fingerprint
+```
+
+#### Network Topology Analysis
+```bash
+python arpPing.py -t 192.168.1.0/24 --topology
+```
+
+#### Continuous Monitoring with Notifications
+```bash
+# Monitor every 60 seconds with desktop notifications
+python arpPing.py -t 192.168.1.0/24 --monitor --interval 60 --notify
+```
+
+#### Full-Featured Scan
+```bash
+python arpPing.py -t 192.168.1.0/24 --hostname --ports --fingerprint --topology
+```
+
 #### Fast Scan with More Threads
 ```bash
 python arpPing.py -t 192.168.1.0/24 -w 100
@@ -55,17 +96,12 @@ python arpPing.py -t 192.168.1.0/24 -v
 
 #### Save Results to JSON
 ```bash
-python arpPing.py -t 192.168.1.0/24 -o json -f scan_results.json
+python arpPing.py -t 192.168.1.0/24 --fingerprint -o json -f scan_results.json
 ```
 
 #### Save Results to CSV
 ```bash
 python arpPing.py -t 192.168.1.0/24 -o csv -f scan_results.csv
-```
-
-#### Combine Multiple Options
-```bash
-python arpPing.py -t 10.0.0.0/24 -w 100 -v -o json -f results.json
 ```
 
 ## Command-Line Arguments
@@ -77,10 +113,19 @@ python arpPing.py -t 10.0.0.0/24 -w 100 -v -o json -f results.json
 | `--verbose` | `-v` | Enable verbose output for debugging | False | ❌ No |
 | `--output` | `-o` | Output format: `json` or `csv` | - | ❌ No |
 | `--file` | `-f` | Output filename (required if `-o` is used) | - | ⚠️ Conditional |
+| `--hostname` | - | Resolve and display hostnames | False | ❌ No |
+| `--ports` | - | Scan common ports on discovered devices | False | ❌ No |
+| `--port-list` | - | Custom port list (comma-separated) | - | ❌ No |
+| `--fingerprint` | - | Identify device types | False | ❌ No |
+| `--topology` | - | Display network topology information | False | ❌ No |
+| `--monitor` | - | Continuous monitoring mode | False | ❌ No |
+| `--interval` | - | Monitoring interval in seconds | 30 | ❌ No |
+| `--notify` | - | Enable desktop notifications (with `--monitor`) | False | ❌ No |
 | `--help` | `-h` | Show help message and exit | - | ❌ No |
 
 ## Output Example
 
+### Basic Scan
 ```
 [+] Operating System: Windows
 [+] Python Version: 3.11.0
@@ -107,6 +152,61 @@ python arpPing.py -t 10.0.0.0/24 -w 100 -v -o json -f results.json
 =================================================================
  Total active hosts: 3
 =================================================================
+```
+
+### With Fingerprinting and Hostname
+```
+[+] Found: 192.168.1.1   -> 00:11:22:33:44:55  [TP-Link Router/AP] (router.local)
+[+] Found: 192.168.1.50  -> 3c:15:c2:aa:bb:cc  [iPhone] (Johns-iPhone.local)
+[+] Found: 192.168.1.100 -> b8:27:eb:dd:ee:ff  [Raspberry Pi] (raspberrypi.local)
+
+=================================================================
+ IP Address           MAC Address          Status      Device Type              Hostname                 
+=================================================================
+ 192.168.1.1          00:11:22:33:44:55    Responded   TP-Link Router/AP        router.local            
+ 192.168.1.50         3c:15:c2:aa:bb:cc    Responded   iPhone                   Johns-iPhone.local      
+ 192.168.1.100        b8:27:eb:dd:ee:ff    Responded   Raspberry Pi             raspberrypi.local       
+=================================================================
+ Total active hosts: 3
+=================================================================
+```
+
+### With Topology Information
+```
+============================================================
+ NETWORK TOPOLOGY
+============================================================
+ Subnet:          192.168.1.0/24
+ Gateway:         192.168.1.1
+ IP Range:        192.168.1.1 - 192.168.1.254
+ Total Devices:   12
+
+ Device Distribution:
+   - iPhone: 3
+   - Raspberry Pi: 2
+   - Windows Computer: 2
+   - TP-Link Router/AP: 1
+   - Samsung Phone/Tablet: 1
+   - Apple Device: 1
+   - Linux Computer: 1
+   - Unknown: 1
+
+ Identified Servers:
+   - 192.168.1.100      (raspberrypi.local) - 5 open ports
+============================================================
+```
+
+### Monitoring Mode with Notifications
+```
+[+] Starting network monitoring mode
+[+] Scan interval: 60 seconds
+[+] Desktop notifications: Enabled
+
+[!] ALERT: 1 new device(s) detected:
+    [+] 192.168.1.150 -> aa:bb:cc:dd:ee:ff [Samsung Phone/Tablet]
+
+[!] ALERT: 1 device(s) left:
+    [-] 192.168.1.200 -> 11:22:33:44:55:66 [Apple Device]
 ```
 
 ## JSON Output Format
