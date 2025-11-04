@@ -1,4 +1,4 @@
-# Simple Network Scanner (netscan.py)
+# Simple Network Scanner (arpPing.py)
 
 This Python script performs a local network scan, similar to `netdiscover`, by leveraging standard Linux system commands (`ping` and `arp`) to find active hosts' IP and MAC addresses.
 
